@@ -269,12 +269,16 @@ class TestRollupToIndexChain:
         from app.services.tier_storage import TierStorageService
         from app.store import store
 
-        # 准备降采样数据文件
+        # 准备降采样数据文件（含事件日与明确时间范围原件证据）
         ds_data = []
         for i in range(15):
             ds_data.append({"task_id": "DOWN-P6", "point": "SENS-P6",
+                           "product_type": "downsampled",
                            "window_index": i+1, "aggregated_value": round(23.5 + i * 0.2, 4),
-                           "method": "均值", "target_freq": "1Hz"})
+                           "method": "均值", "target_freq": "1Hz",
+                           "event_day": "2026-09-01",
+                           "time_start": f"2026-09-01T10:{i:02d}:00",
+                           "time_end": f"2026-09-01T10:{i:02d}:59"})
         (setup_data_dir / "downsampled").mkdir(parents=True, exist_ok=True)
         with open(setup_data_dir / "downsampled" / "DOWN-SENS-P6_downsampled.jsonl", "w", encoding="utf-8") as f:
             for d in ds_data:

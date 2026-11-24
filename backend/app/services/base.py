@@ -108,7 +108,11 @@ class BaseModuleService:
         return p
 
     def _write_jsonl(self, filepath: Path, records: list[dict[str, Any]]) -> int:
-        """将记录列表按行写入 JSONL 文件，返回实际写入条数。"""
+        """将记录列表按行追加写入 JSONL 文件，返回实际写入条数。
+
+        适用于日志、流水类只增不改的产物；索引/冷区等需要"重建即替换"
+        语义的产物必须使用 ``_overwrite_jsonl``，避免旧版本错误数据残留。
+        """
         _ensure_dir(filepath.parent)
         written = 0
         with open(filepath, "a", encoding="utf-8") as f:
@@ -116,6 +120,19 @@ class BaseModuleService:
                 f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
                 written += 1
         return written
+
+    def _overwrite_jsonl(self, filepath: Path, records: list[dict[str, Any]]) -> int:
+        """整文件覆盖写 JSONL，用于重建类产物，保证旧记录不会残留在新文件里。"""
+        _ensure_dir(filepath.parent)
+        with open(filepath, "w", encoding="utf-8") as f:
+            for rec in records:
+                f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
+        return len(records)
+
+    def _record_checksum(self, record: dict[str, Any]) -> str:
+        """对单条原件记录计算稳定校验和，供索引锚定与独立核验使用。"""
+        content = json.dumps(record, ensure_ascii=False, sort_keys=True, default=str)
+        return self._compute_checksum(content)
 
     def _read_jsonl(self, filepath: Path) -> list[dict[str, Any]]:
         """从 JSONL 文件逐行读取记录列表，用于跨模块共享数据产物。"""

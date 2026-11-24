@@ -77,5 +77,22 @@ npm run dev
 - 列表接口统一返回 `{ items, total, page, size }`，动作接口统一返回 `{ ok, message }`。
 - 状态流转只允许在 `app/services` 里改，路由层不做业务判断。
 
+## 序列索引归属与冷热迁移核验
+
+序列索引按**测点 + 事件日 + 产物类型**三维归属构建，构建/迁冷时逐记录回
+归并（`rollup_windows/*_rollup.jsonl`）与降采样（`downsampled/*_downsampled.jsonl`）
+原件核验：测点一致、事件日与分区一致、明确时间范围落在该事件日内、校验
+和匹配，四项全部通过才受理；其他测点的文件即使在同一目录也不会被扫描
+进本测点分区，无法核验的记录不进索引、不允许迁冷。
+
+- 索引重建（工作台动作「重建索引」或 `POST /api/domain/series-index/{id}/rebuild`）
+  先把旧索引整体归档到 `series_index/history/` 再覆盖重写，错误归属不残留，
+  旧版索引可凭归并原件的时间范围与测点证据继续回查。
+- 归并更正值以新版本原件追加（`POST /api/domain/rollup/correct`），旧原件
+  保留；受理后、写入前出现更正值时，该窗口本次迁冷等待重建，原查询号
+  （`GET /api/domain/series-index/query/{query_no}`）仍读回受理当时的历史值。
+- 迁冷写入按业务身份幂等替换，冷区每个窗口最终只有一份现时交付
+  （`POST /api/domain/tier/admit` → `/tier/evict` → `GET /tier/cold/{point}`）。
+
 领域：数据工程
 子方向：数据采集、爬虫与RPA

@@ -9,6 +9,21 @@ from app.services.base import BaseModuleService
 from app.store import store
 
 
+def _event_day(timestamp: str) -> str:
+    """从 ISO 时间字符串取事件日（YYYY-MM-DD）；无法解析时返回空串。"""
+    if not timestamp:
+        return ""
+    head = str(timestamp).strip().replace(" ", "T")
+    if len(head) >= 10 and head[4] == "-" and head[7] == "-":
+        day = head[:10]
+        try:
+            time.strptime(day, "%Y-%m-%d")
+            return day
+        except ValueError:
+            return ""
+    return ""
+
+
 class DownsampleService(BaseModuleService):
     MODULE = "downsample"
     ENTITY = "降采样任务"
@@ -18,6 +33,12 @@ class DownsampleService(BaseModuleService):
     STATUS_ORDER = ["草稿", "待执行", "执行中", "已完成"]
     ACTION_RULES = {"启动执行": "执行中", "标记完成": "已完成", "标记失败": "已完成"}
     NEGATIVE_ACTIONS = []
+
+    @staticmethod
+    def _event_day_from_times(timestamps: list[str]) -> str:
+        """窗口内时间戳同属一个事件日时返回该日；跨日或缺证据时返回空串。"""
+        days = {_event_day(ts) for ts in timestamps if _event_day(ts)}
+        return next(iter(days)) if len(days) == 1 else ""
 
     # 数据聚合操作：按窗口执行降采样聚合计算生成降采样结果序列数据集
     def downsample_series(self, task_id: int, source_data_file: str | None = None) -> dict[str, Any]:
@@ -47,6 +68,7 @@ class DownsampleService(BaseModuleService):
         for i in range(0, len(records), window_size):
             window = records[i:i + window_size]
             values = []
+            window_times = []
             for r in window:
                 # 数据产物输出：将降采样结果写入降采样序列数据JSONL文件
                 v = r.get("calibrated_value_V", r.get("raw_value_mV", r.get("raw_value", 0)))
@@ -54,6 +76,9 @@ class DownsampleService(BaseModuleService):
                     values.append(float(v))
                 except (ValueError, TypeError):
                     values.append(0.0)
+                ts = r.get("timestamp") or r.get("event_time")
+                if ts:
+                    window_times.append(str(ts))
             if not values:
                 continue
             if agg_method in ("均值", "avg"):
@@ -64,14 +89,23 @@ class DownsampleService(BaseModuleService):
                 agg_val = round(min(values), 4)
             else:
                 agg_val = round(sum(values) / len(values), 4)
+            # 事件日与明确时间范围是后续序列索引核验测点/事件日归属的原件证据，
+            # 没有时间证据的窗口不能被任何日分区索引受理。
+            event_day = self._event_day_from_times(window_times)
+            time_start = min(window_times) if window_times else ""
+            time_end = max(window_times) if window_times else ""
             downsampled.append({
                 "task_id": entry["任务编号"],
                 "point": point_key,
+                "product_type": "downsampled",
                 "window_index": len(downsampled) + 1,
                 "source_count": len(window),
                 "aggregated_value": agg_val,
                 "method": agg_method,
                 "target_freq": target_freq,
+                "event_day": event_day,
+                "time_start": time_start,
+                "time_end": time_end,
             })
         # 将降采样结果写入降采样序列数据文件
         output_file = self._data_dir("downsampled") / f"{entry['任务编号']}_downsampled.jsonl"
